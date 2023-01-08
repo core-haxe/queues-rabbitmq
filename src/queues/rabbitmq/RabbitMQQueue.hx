@@ -30,8 +30,13 @@ class RabbitMQQueue<T> implements IQueue<T> {
         _config = config;
     }
 
+    private var _started:Bool = false;
     public function start():Promise<Bool> {
         return new Promise((resolve, reject) -> {
+            if (_started) {
+                resolve(true);
+                return;
+            }
             ConnectionManager.instance.getConnection(_config.brokerUrl).then(connection -> {
                 _queue = new RetryableQueue({
                     connection: connection,
@@ -40,6 +45,7 @@ class RabbitMQQueue<T> implements IQueue<T> {
                 return _queue.start();
             }).then(retryableQueue -> {
                 retryableQueue.onMessage = onRabbitMQMessage;
+                _started = true;
                 resolve(true);
             }, (error:RabbitMQError) -> {
                 //connection.close();
