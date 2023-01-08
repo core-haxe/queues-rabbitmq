@@ -1,0 +1,1 @@
+--macro queues.macros.QueueTypes.register("rabbitmq-queue", "queues.rabbitmq.RabbitMQQueue")
