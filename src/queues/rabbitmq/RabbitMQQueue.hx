@@ -1,15 +1,17 @@
 package queues.rabbitmq;
 
-import haxe.Unserializer;
 import haxe.Serializer;
-import rabbitmq.Message;
-import rabbitmq.RetryableQueue;
-import rabbitmq.ConnectionManager;
-import rabbitmq.RabbitMQError;
+import haxe.Unserializer;
 import promises.Promise;
+import rabbitmq.ConnectionManager;
+import rabbitmq.Message;
+import rabbitmq.RabbitMQError;
+import rabbitmq.RetryableQueue;
 
 class RabbitMQQueue<T> implements IQueue<T> {
     private var _queue:RetryableQueue;
+
+    private var _producerOnly:Bool = false;
 
     public function new() {
     }
@@ -28,6 +30,9 @@ class RabbitMQQueue<T> implements IQueue<T> {
     public function config(config:Dynamic) {
         // TODO: validate or dont use Dynamic (somehow)
         _config = config;
+        if (_config != null && _config.producerOnly != null) {
+            _producerOnly = _config.producerOnly;
+        }
     }
 
     private var _started:Bool = false;
@@ -40,11 +45,14 @@ class RabbitMQQueue<T> implements IQueue<T> {
             ConnectionManager.instance.getConnection(_config.brokerUrl).then(connection -> {
                 _queue = new RetryableQueue({
                     connection: connection,
-                    queueName: _config.queueName
+                    queueName: _config.queueName,
+                    producerOnly: _producerOnly
                 });
                 return _queue.start();
             }).then(retryableQueue -> {
-                retryableQueue.onMessage = onRabbitMQMessage;
+                if (!_producerOnly) {
+                    retryableQueue.onMessage = onRabbitMQMessage;
+                }
                 _started = true;
                 resolve(true);
             }, (error:RabbitMQError) -> {
