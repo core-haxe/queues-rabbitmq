@@ -4,7 +4,7 @@ rabbitmq queue plugin for [__queues-core__](https://github.com/core-haxe/queues-
 # basic usage
 
 ```haxe
-var queue:IQueue<Int> = QueueFactory.createDatabase(QueueFactory.RABBITMQ_QUEUE, {
+var queue:IQueue<Int> = QueueFactory.createQueue(QueueFactory.RABBITMQ_QUEUE, {
     brokerUrl: "amqp://localhost",
     queueName: "my-http-request-queue"
 });
