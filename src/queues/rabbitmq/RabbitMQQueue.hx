@@ -1,12 +1,12 @@
 package queues.rabbitmq;
 
-import haxe.Serializer;
-import haxe.Unserializer;
+import avp.core.dao.JobData;
 import promises.Promise;
 import rabbitmq.ConnectionManager;
 import rabbitmq.Message;
 import rabbitmq.RabbitMQError;
 import rabbitmq.RetryableQueue;
+import serializers.ISerializable;
 
 class RabbitMQQueue<T> implements IQueue<T> {
     private var _queue:RetryableQueue;
@@ -83,7 +83,16 @@ class RabbitMQQueue<T> implements IQueue<T> {
     }
 
     private function onRabbitMQMessage(message:Message) {
-        var item:Dynamic = Unserializer.run(message.content.toString()); // TODO: probably want to make this pluggable
+        var item:Dynamic = null;
+        if (message.headers != null && message.headers.get("serializer") != null) {
+            var serializerClass = message.headers.get("serializer");
+            item = Type.createInstance(Type.resolveClass(serializerClass), []);
+            if ((item is ISerializable)) {
+                cast(item, ISerializable).unserialize(message.content.toString());
+            }
+        } else {
+            item = haxe.Unserializer.run(message.content.toString()); // TODO: probably want to make this pluggable
+        }
         _onMessage(item).then(success -> {
             if (success) {
                 message.ack();
@@ -96,13 +105,25 @@ class RabbitMQQueue<T> implements IQueue<T> {
     }
 
     public function enqueue(item:T) {
-        var data = Serializer.run(item); // TODO: probably want to make this pluggable
-        var message = new Message(data);
+        var headers:Map<String, Any> = [];
+        var data:String = null;
+        if ((item is ISerializable)) {
+            headers.set("serializer", Type.getClassName(Type.getClass(item)));
+            data = cast(item, ISerializable).serialize();
+        } else{
+            data = haxe.Serializer.run(item);
+        }
+        var message = new Message(data, headers);
         _queue.publish(message);
     }
 
     public function requeue(item:T, delay:Null<Int> = null) {
-        var data = Serializer.run(item); // TODO: probably want to make this pluggable
+        var data:String = null;
+        if ((item is ISerializable)) {
+            data = cast(item, ISerializable).serialize();
+        } else{
+            data = haxe.Serializer.run(item);
+        }
         var message = new Message(data);
         _queue.retry(message, delay);
     }
