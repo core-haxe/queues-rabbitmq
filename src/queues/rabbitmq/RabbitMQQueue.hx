@@ -1,6 +1,5 @@
 package queues.rabbitmq;
 
-import avp.core.dao.JobData;
 import promises.Promise;
 import rabbitmq.ConnectionManager;
 import rabbitmq.Message;
