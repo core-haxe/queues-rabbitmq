@@ -1,28 +1,36 @@
 package queues.rabbitmq;
 
-import rabbitmq.MessageOptions;
+import haxe.io.Bytes;
 import promises.Promise;
 import rabbitmq.ConnectionManager;
-import rabbitmq.Message;
 import rabbitmq.RabbitMQError;
-import rabbitmq.RetryableQueue;
+import rabbitmq.Queue;
+import rabbitmq.Message;
 import serializers.ISerializable;
+import rabbitmq.Channel;
 
-class RabbitMQQueue<T> implements IQueue<T> {
-    private var _queue:RetryableQueue;
-
-    private var _producerOnly:Bool = false;
+class RabbitMQExclusiveQueue<T> implements IQueue<T> {
+    private var _queue:Queue;
+    private var _channel:Channel;
 
     public function new() {
     }
 
-    private var _name:String = null;
     public var name(get, set):String;
     private function get_name() {
-        return _name;
+        if (_queue != null) {
+            return _queue.name;
+        }
+        return _config.queueName;
     }
     private function set_name(value:String):String {
-        _name = value;
+        if (_queue != null) {
+            return value;
+        }
+        if (_config == null) {
+            _config = {};
+        }
+        _config.queueName = value;
         return value;
     }
 
@@ -33,6 +41,8 @@ class RabbitMQQueue<T> implements IQueue<T> {
     }
     private function set_onMessage(value:T->Promise<Bool>):T->Promise<Bool> {
         _onMessage = value;
+        _queue.onMessage = onRabbitMQMessage;
+        _queue.startConsuming();
         return value;
     }
     
@@ -43,18 +53,16 @@ class RabbitMQQueue<T> implements IQueue<T> {
     }
     private function set_onMessageWithProperties(value:T->Map<String, Any>->Promise<Bool>):T->Map<String, Any>->Promise<Bool> {
         _onMessageWithProperties = value;
+        _queue.startConsuming();
         return value;
     }
-    
+
     private var _config:Dynamic = null;
     public function config(config:Dynamic) {
         // TODO: validate or dont use Dynamic (somehow)
         _config = config;
-        if (_config != null && _config.producerOnly != null) {
-            _producerOnly = _config.producerOnly;
-        }
     }
-
+ 
     private var _started:Bool = false;
     public function start():Promise<Bool> {
         return new Promise((resolve, reject) -> {
@@ -62,57 +70,50 @@ class RabbitMQQueue<T> implements IQueue<T> {
                 resolve(true);
                 return;
             }
-            ConnectionManager.instance.getConnection(_config.brokerUrl).then(connection -> {
-                _queue = new RetryableQueue({
-                    connection: connection,
-                    queueName: _config.queueName,
-                    producerOnly: _producerOnly
+
+            if (_config.queueName == null || _config.queueName == "") {
+                ConnectionManager.instance.getConnection(_config.brokerUrl).then(connection -> {
+                    connection.createChannel(false);
+                }).then(result -> {
+                    return result.channel.createQueue(_config.queueName, {
+                        exclusive: true
+                    });
+                }).then(result -> {
+                    _queue = result.queue;
+                    resolve(true);
+                }, (error:RabbitMQError) -> {
+                    //connection.close();
+                    reject(error);
                 });
-                return _queue.start();
-            }).then(retryableQueue -> {
-                if (!_producerOnly) {
-                    retryableQueue.onMessage = onRabbitMQMessage;
-                }
-                _started = true;
-                resolve(true);
-            }, (error:RabbitMQError) -> {
-                //connection.close();
-                reject(error);
-            });
-    
+            } else {
+                ConnectionManager.instance.getConnection(_config.brokerUrl).then(connection -> {
+                    connection.createChannel(false);
+                }).then(result -> {
+                    _channel = result.channel;
+                    resolve(true);
+                }, (error:RabbitMQError) -> {
+                    //connection.close();
+                    reject(error);
+                });
+            }
         });
     }
-
     public function stop():Promise<Bool> {
         return new Promise((resolve, reject) -> {
-            //_queue.onMessage = null;
+            resolve(true);
+            /*
             _queue.close().then(success -> {
                 resolve(success);
             });
+            */
         });
     }
 
     private function onRabbitMQMessage(message:Message) {
         var item:Dynamic = null;
         if (message.headers != null && message.headers.get("serializer") != null) {
-            var serializerClass:String = message.headers.get("serializer");
-
-            #if nodejs
-            var ref = js.Syntax.code("global");
-            var parts = serializerClass.split(".");
-            for (part in parts) {
-                ref = js.Syntax.code("{0}[{1}]", ref, part);
-                if (ref == null) {
-                    break;
-                }
-            }
-            if (ref != null) {
-                item = js.Syntax.code("new {0}", ref);
-            }
-            #else
+            var serializerClass = message.headers.get("serializer");
             item = Type.createInstance(Type.resolveClass(serializerClass), []);
-            #end
-
             if ((item is ISerializable)) {
                 cast(item, ISerializable).unserialize(message.content.toString());
             }
@@ -152,22 +153,11 @@ class RabbitMQQueue<T> implements IQueue<T> {
         } else{
             data = haxe.Serializer.run(item);
         }
-        var options:MessageOptions = { }
-        if (properties != null) {
-            options.replyTo = properties.get("replyTo");
-        }
-        var message = new Message(data, headers, options);
-        _queue.publish(message);
+
+        _channel.sendToQueue(this.name, Bytes.ofString(data));
     }
 
     public function requeue(item:T, delay:Null<Int> = null) {
-        var data:String = null;
-        if ((item is ISerializable)) {
-            data = cast(item, ISerializable).serialize();
-        } else{
-            data = haxe.Serializer.run(item);
-        }
-        var message = new Message(data);
-        _queue.retry(message, delay);
+        throw "not implemented";
     }
 }

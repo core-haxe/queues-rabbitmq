@@ -1,1 +1,2 @@
 --macro queues.macros.QueueTypes.register("rabbitmq-queue", "queues.rabbitmq.RabbitMQQueue")
+--macro queues.macros.QueueTypes.register("rabbitmq-exclusive-queue", "queues.rabbitmq.RabbitMQExclusiveQueue")
