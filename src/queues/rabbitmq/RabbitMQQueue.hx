@@ -98,16 +98,19 @@ class RabbitMQQueue<T> implements IQueue<T> {
             var serializerClass:String = message.headers.get("serializer");
 
             #if nodejs
-            var ref = js.Syntax.code("global");
-            var parts = serializerClass.split(".");
-            for (part in parts) {
-                ref = js.Syntax.code("{0}[{1}]", ref, part);
-                if (ref == null) {
-                    break;
+            item = Type.createInstance(Type.resolveClass(serializerClass), []);
+            if (item == null) {
+                var ref = js.Syntax.code("global");
+                var parts = serializerClass.split(".");
+                for (part in parts) {
+                    ref = js.Syntax.code("{0}[{1}]", ref, part);
+                    if (ref == null) {
+                        break;
+                    }
                 }
-            }
-            if (ref != null) {
-                item = js.Syntax.code("new {0}", ref);
+                if (ref != null) {
+                    item = js.Syntax.code("new {0}", ref);
+                }
             }
             #else
             item = Type.createInstance(Type.resolveClass(serializerClass), []);

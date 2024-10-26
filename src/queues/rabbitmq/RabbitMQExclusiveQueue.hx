@@ -112,8 +112,27 @@ class RabbitMQExclusiveQueue<T> implements IQueue<T> {
     private function onRabbitMQMessage(message:Message) {
         var item:Dynamic = null;
         if (message.headers != null && message.headers.get("serializer") != null) {
-            var serializerClass = message.headers.get("serializer");
+            var serializerClass:String = message.headers.get("serializer");
+
+            #if nodejs
             item = Type.createInstance(Type.resolveClass(serializerClass), []);
+            if (item == null) {
+                var ref = js.Syntax.code("global");
+                var parts = serializerClass.split(".");
+                for (part in parts) {
+                    ref = js.Syntax.code("{0}[{1}]", ref, part);
+                    if (ref == null) {
+                        break;
+                    }
+                }
+                if (ref != null) {
+                    item = js.Syntax.code("new {0}", ref);
+                }
+            }
+            #else
+            item = Type.createInstance(Type.resolveClass(serializerClass), []);
+            #end
+
             if ((item is ISerializable)) {
                 cast(item, ISerializable).unserialize(message.content.toString());
             }
