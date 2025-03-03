@@ -1,5 +1,6 @@
 package queues.rabbitmq;
 
+import rabbitmq.Connection;
 import rabbitmq.MessageOptions;
 import promises.Promise;
 import rabbitmq.ConnectionManager;
@@ -63,6 +64,7 @@ class RabbitMQQueue<T> implements IQueue<T> {
                 return;
             }
             ConnectionManager.instance.getConnection(_config.brokerUrl).then(connection -> {
+                connection.listenFor("error", onConnectionError);
                 _queue = new RetryableQueue({
                     connection: connection,
                     queueName: _config.queueName,
@@ -77,9 +79,56 @@ class RabbitMQQueue<T> implements IQueue<T> {
                 resolve(true);
             }, (error:RabbitMQError) -> {
                 //connection.close();
-                reject(error);
+                if (ConnectionManager.autoReconnect && !_producerOnly && error.message.indexOf("connect ECONNREFUSED") != -1) {  // TODO: flakey error recognition
+                    attemptReconnect().then(reconnected -> {
+                        resolve(reconnected);
+                    }, error -> {
+                        reject(error);
+                    });
+                } else {
+                    reject(error);
+                }
             });
-    
+        });
+    }
+
+    private function onConnectionError(error:Any, connection:Connection) {
+        var errorString = Std.string(error);
+        if (errorString == "Error: read ECONNRESET") { // TODO: flakey error recognition
+            connection.unlistenFor("error", onConnectionError);
+            // note that we will only try to reconnect in this queue object when its not a producer only
+            // the reasoning is that "publish" code has its only retry mechanism (similar to this one)
+            // but it happens at the point of failure (ie, publish), this means we dont have to make any
+            // checks in the enqueue in this class and can let the producer handle its own reconnection
+            // internally and re-publish its messages (rather than having to cache them here or lose them)
+            if (ConnectionManager.autoReconnect && !_producerOnly) {
+                attemptReconnect();
+            }
+        }
+    }
+
+    private function attemptReconnect():Promise<Bool> {
+        return new Promise((resolve, reject) -> {
+            haxe.Timer.delay(() -> {
+                _attemptReconnect(resolve, reject);
+            }, ConnectionManager.autoReconnectIntervalMS);
+        });
+    }
+
+    private function _attemptReconnect(resolve:Bool->Void, reject:Any->Void) {
+        trace("connection dropped, attempting to reconnect");
+        // we'll force a new connection here, not technically need since the connection manager
+        // will automatically clean itself up, but this is an added level of being sure
+        ConnectionManager.instance.getConnection(_config.brokerUrl, true).then(connection -> {
+            trace("reconnected successfully after dropped connection");
+            _started = false;
+            return start();
+        }).then(result -> {
+            resolve(true);
+        }, error -> {
+            haxe.Timer.delay(() -> {
+                _attemptReconnect(resolve, reject);
+            }, ConnectionManager.autoReconnectIntervalMS);
         });
     }
 
