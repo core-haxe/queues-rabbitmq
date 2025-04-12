@@ -134,9 +134,11 @@ class RabbitMQQueue<T> implements IQueue<T> {
 
     public function stop():Promise<Bool> {
         return new Promise((resolve, reject) -> {
-            //_queue.onMessage = null;
+            _queue.onMessage = null;
             _queue.close().then(success -> {
                 resolve(success);
+            }, error -> {
+                reject(error);
             });
         });
     }
@@ -195,6 +197,8 @@ class RabbitMQQueue<T> implements IQueue<T> {
             }, error -> {
                 message.nack();
             });
+        } else {
+            message.nack();
         }
     }
 
