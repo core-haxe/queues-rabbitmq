@@ -65,6 +65,7 @@ class RabbitMQQueue<T> implements IQueue<T> {
             }
             ConnectionManager.instance.getConnection(_config.brokerUrl).then(connection -> {
                 connection.listenFor("error", onConnectionError);
+                connection.listenFor("close", onConnectionClosed);
                 _queue = new RetryableQueue({
                     connection: connection,
                     queueName: _config.queueName,
@@ -78,7 +79,6 @@ class RabbitMQQueue<T> implements IQueue<T> {
                 _started = true;
                 resolve(true);
             }, (error:RabbitMQError) -> {
-                //connection.close();
                 if (ConnectionManager.autoReconnect && !_producerOnly && error.message.indexOf("connect ECONNREFUSED") != -1) {  // TODO: flakey error recognition
                     attemptReconnect().then(reconnected -> {
                         resolve(reconnected);
@@ -96,6 +96,7 @@ class RabbitMQQueue<T> implements IQueue<T> {
         var errorString = Std.string(error);
         if (errorString == "Error: read ECONNRESET") { // TODO: flakey error recognition
             connection.unlistenFor("error", onConnectionError);
+            connection.unlistenFor("closed", onConnectionClosed);
             // note that we will only try to reconnect in this queue object when its not a producer only
             // the reasoning is that "publish" code has its only retry mechanism (similar to this one)
             // but it happens at the point of failure (ie, publish), this means we dont have to make any
@@ -104,6 +105,19 @@ class RabbitMQQueue<T> implements IQueue<T> {
             if (ConnectionManager.autoReconnect && !_producerOnly) {
                 attemptReconnect();
             }
+        }
+    }
+
+    private function onConnectionClosed(_, connection:Connection) {
+        connection.unlistenFor("closed", onConnectionClosed);
+        connection.unlistenFor("error", onConnectionError);
+        // note that we will only try to reconnect in this queue object when its not a producer only
+        // the reasoning is that "publish" code has its only retry mechanism (similar to this one)
+        // but it happens at the point of failure (ie, publish), this means we dont have to make any
+        // checks in the enqueue in this class and can let the producer handle its own reconnection
+        // internally and re-publish its messages (rather than having to cache them here or lose them)
+        if (ConnectionManager.autoReconnect && !_producerOnly) {
+            attemptReconnect();
         }
     }
 
